@@ -1,0 +1,575 @@
+
+#include "mbed.h"
+#include "glibr.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include "cmsis.h"
+
+glibr Gsensor(P0_27, P0_28); //GSensor(SDApin, SCLpin)
+Serial serial(USBTX, USBRX);
+Serial esp(P4_28, P4_29); // tx, rx
+DigitalOut reset(P0_4);
+DigitalOut blueLed(P2_3);
+DigitalOut greenLed(P2_4);
+DigitalOut redLed(P2_5);
+DigitalOut vibr(P2_12);
+
+Timer t;
+
+int  count, count_chars=0, ended,timeout, i, j, n, egg=0, mobile=0, result;
+const char *dump =0, *msg=0;
+char buf[4096];
+char snd[255];
+char sendStr[11];
+char ssid[32] = "RWNCLFSD";     // enter WiFi router ssid inside the quotes
+char pwd [32] = "SRBCMQRDSH"; // enter WiFi router password inside the quotes
+
+void SendCMD();
+void getReply();
+void parstr();
+void game_over();
+void begin();
+void egg_def();
+void message_received();
+int random_num_generator();
+int main() {
+    
+    //Make sure all feedback mechanisms are turned off
+    blueLed=0;
+    greenLed=0;
+    redLed=0;
+    vibr=0;
+
+    //set buad rates for comms
+    esp.baud(115200);
+    serial.baud(115200);
+
+    // Setup a serial interrupt function to capture received data
+    esp.attach(&getReply, Serial::RxIrq);
+    
+    //Device doesn't appear to need a reset upon waking up so the device is not reset (i.e. re-set = 1);
+    reset=1;
+
+    // Give the user some to setup the virtual terminal
+    wait(5);
+
+    serial.printf("\n---------- Factory reset device ----------\r\n");
+    strcpy(snd, "AT+RESTORE\r\n");
+    timeout=5;
+    SendCMD();
+    getReply();
+    serial.printf(buf);
+    
+    serial.printf("\n---------- Check status ----------\r\n");  //
+    strcpy(snd, "AT+GMR\r\n");
+    timeout=2;
+    SendCMD();
+    getReply();
+    serial.printf(buf);
+    
+    serial.printf("\n---------- Check status ----------\r\n");  //
+    strcpy(snd, "AT+CWMODE_CUR=1\r\n");
+    timeout=2;
+    SendCMD();
+    getReply();
+    serial.printf(buf);
+    
+    serial.printf("\n---------- List APs in Range ----------\r\n"); 
+    strcpy(snd, "AT+CWLAP\r\n");
+    timeout=5;
+    SendCMD();
+    getReply(); 
+    serial.printf(buf);
+    
+    serial.printf("\n---------- Connecting to AP ----------\r\n"); 
+    serial.printf("ssid = %s pwd = %s\r\n",ssid,pwd); 
+    strcpy(snd, "AT+CWJAP_DEF=\""); 
+    strcat(snd, ssid);
+    strcat(snd, "\",\""); 
+    strcat(snd, pwd); 
+    strcat(snd, "\"\r\n"); 
+    timeout=8;
+    SendCMD();
+    getReply();
+    serial.printf(buf);
+    
+    serial.printf("\n---------- Check APIP ----------\r\n");  //Verify that you still have a station IP address
+    strcpy(snd, "AT+CIPSTA_CUR?\r\n");
+    timeout=3;
+    SendCMD();
+    getReply();
+    serial.printf(buf); 
+    
+     serial.printf("\n---------- Turn on Multiple Connections  ----------\r\n");  //
+    strcpy(snd, "AT+CIPMUX=1\r\n");
+    timeout=2;
+    SendCMD();
+    getReply();
+    serial.printf(buf); 
+    
+    serial.printf("\n---------- Establishing UDP Connection ----------\r\n");
+    strcpy(snd, "AT+CIPSTART=4,\"UDP\",\"192.168.0.102\",1234,5678,0\r\n");
+    SendCMD();
+    timeout=3;
+    getReply();
+    serial.printf(buf);
+ 
+    //Check to see that the connection has been established
+    serial.printf("\n---------- Connection Information ----------\r\n");
+    strcpy(snd, "AT+CIFSR\r\n"); //get local IP address
+    timeout=5;
+    SendCMD();
+    getReply();
+    serial.printf(buf); 
+    
+    if(Gsensor.ginit()){
+        serial.printf("APDS-9960 initialization complete!!\n\r");
+        }else{
+            serial.printf("Something went wrong during APDS-9960 init\n\r");
+        }
+        
+    //Start running the APDS-9960 gesture sensor engine
+    if(Gsensor.enableGestureSensor(true)){
+        serial.printf("Gesture sensor now running!!\n\r");
+        }else{
+            serial.printf("Something went wrong during gesture sensor init!\n\r");
+        }
+    
+    begin();
+    while(1) {
+        
+        if ( Gsensor.isGestureAvailable() ) {
+            switch ( Gsensor.readGesture() ) {
+                case DIR_UP:
+                    serial.printf("UP\n\r");
+                    blueLed=0;
+                    greenLed=1;
+                    redLed=0;
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,2\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "UP");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    wait(5);
+                    serial.printf(buf);
+                    parstr();
+                    random_num_generator();
+                    
+                    
+                case DIR_DOWN:
+                    serial.printf("DOWN");
+                    blueLed=0;
+                    greenLed=0;
+                    redLed=1;
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,4\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "DOWN");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    wait(5);
+                    serial.printf(buf);
+                    parstr();
+                    random_num_generator();
+                    
+                    case DIR_LEFT:
+                    serial.printf("LEFT\n\r");
+                    blueLed=1;
+                    greenLed=0;
+                    redLed=0;
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,4\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "LEFT");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    wait(5);
+                    
+                    serial.printf(buf);
+                    
+                    parstr();
+                    random_num_generator();
+                    
+                case DIR_RIGHT:
+                    serial.printf("RIGHT\n\r");
+                    blueLed=0;
+                    greenLed=1;
+                    redLed=1;
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,5\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "RIGHT");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    wait(5);
+                    
+                    serial.printf(buf);
+                    
+                    parstr();
+                    
+                    random_num_generator();
+
+                case DIR_NEAR:
+                    serial.printf("NEAR\n\r");
+                    break;
+                case DIR_FAR:
+                    serial.printf("FAR\n\r");
+                    break;
+                default:
+                    serial.printf("NONE\n\r");
+                    blueLed=0;
+                    greenLed=0;
+                    redLed=0;
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,4\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- NEED GESTURE ----------\r\n"); 
+                    strcpy(snd, "NONE");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    wait(5);
+                    serial.printf(buf);
+                    
+                    break;
+            }   
+        }
+    }
+}
+
+//This function sends the command string to the ESP8266
+void SendCMD()
+{
+    esp.printf("%s", snd);
+}
+
+//This function establishes the space for the received string, starts a timer so that if things get stuck, the 
+//app won't hang.  
+void getReply()
+{
+    memset(buf, '\0', sizeof(buf));
+    t.start();
+    ended=0;
+    count=0;
+    while(!ended) {
+        if(esp.readable()) {
+            buf[count] = esp.getc();
+            count++;
+        }
+        if(t.read() > timeout) {
+            ended = 1;
+            t.stop();
+            t.reset();
+        }
+    }
+   serial.printf(buf);
+}
+
+void parstr()
+{
+    if (strlen(buf) != 0) {    
+            dump = strtok(buf, ":");
+            msg = strtok(NULL, "\0");
+    }
+    //serial.printf(dump);
+    serial.printf("\n");
+    serial.printf(msg);
+    serial.printf("\n");
+    
+    wait(2);
+    
+    if (strcmp (msg, "up")== 0){
+    message_received();
+    }
+    
+    else if (strcmp (msg, "down")== 0){
+    message_received();
+    }
+  else  if (strcmp (msg, "left")== 0){
+    message_received();
+    }
+   else  if (strcmp (msg, "right")== 0){
+    message_received();
+    }
+    else{
+        serial.printf("\n---------- Incorrect gesture ----------\r\n"); 
+        egg++;
+        serial.printf("Egg:%d, Mobile %d\n\n", egg, mobile);
+        timeout=3;
+        SendCMD();
+        getReply();
+        serial.printf(buf); 
+        
+        n = rand() % 2;
+        serial.printf("\n");
+        
+         switch(n)
+        {
+            case 0:
+            serial.printf("\n---------- Egg make mentioned gesture ----------\r\n"); 
+             random_num_generator();
+        
+            case 1:
+            serial.printf("\n---------- Mobile send message ----------\r\n"); 
+            timeout=2;
+            getReply();
+            serial.printf(buf); 
+            parstr();
+        }
+    }  
+}
+
+void game_over()
+{
+                    serial.printf("\n");
+                    serial.printf("GAME OVER!!");
+                    vibr=1;
+                    vibr=0;
+                    vibr=1;
+                    exit(1);
+}
+
+void begin()
+{
+    serial.printf("BEGIN!!\n");
+}
+
+void egg_def()
+{
+    serial.printf("\n---------- Incorrect gesture ----------\r\n");  
+    mobile++;
+    serial.printf("Egg:%d, Mobile %d\n", egg, mobile);
+    vibr=1;
+    vibr=0;
+    vibr=1;
+    vibr=0;
+    timeout=3;
+    SendCMD();
+    getReply();
+    serial.printf(buf); 
+                    
+    if(egg==11||mobile==11)
+    {
+      game_over();
+    }
+                    
+    else
+    {
+      n = rand() % 2;
+      serial.printf("\n");
+    
+      switch(n)
+      {
+        case 0:
+        serial.printf("\n---------- Egg make mentioned gesture ----------\r\n"); 
+        random_num_generator();
+        
+        case 1:
+        serial.printf("\n---------- Mobile send message ----------\r\n"); 
+        timeout=2;
+        getReply();
+        serial.printf(buf); 
+        parstr();
+       }
+     }
+}
+
+void message_received()
+{
+    serial.printf("\n---------- Message received!! ----------\r\n");
+    timeout=3;
+    SendCMD();
+    getReply();
+    serial.printf(buf); 
+    random_num_generator();
+}
+
+int random_num_generator()
+    {
+        n = rand() % 4;
+        serial.printf("\n");
+        wait(3);
+        
+        switch(n)
+        {
+            case 0:
+            
+                    serial.printf("UP\n\r");
+                    blueLed=0;
+                    greenLed=1;
+                    redLed=0;
+                    wait(3);
+
+                    switch ( Gsensor.readGesture() ) {
+                    
+                    case DIR_UP:
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,2\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "UP");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    serial.printf(buf);
+                    parstr();
+                    break;
+            
+                    default:
+                    
+                    egg_def();
+            }
+            case 1:
+                    serial.printf("DOWN\n\r");
+                    blueLed=0;
+                    greenLed=0;
+                    redLed=1;
+                    
+                    wait(3);
+                    
+                    switch ( Gsensor.readGesture() ) {
+                    case DIR_DOWN:
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,4\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "DOWN");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    serial.printf(buf);
+                    parstr();
+                    break;
+                    
+                    default:
+                    egg_def();
+            }
+            case 2:
+                    serial.printf("LEFT\n\r");
+                    blueLed=1;
+                    greenLed=0;
+                    redLed=0;
+                    
+                    wait(3);
+                    
+                    switch ( Gsensor.readGesture() ) {
+                    case DIR_DOWN:
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,4\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "LEFT");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    serial.printf(buf);
+                    parstr();
+                    break;
+                    
+                    default:
+                    egg_def();
+                    
+            }
+            case 3:
+                    serial.printf("RIGHT\n\r");
+                    blueLed=0;
+                    greenLed=1;
+                    redLed=1;
+                    
+                    wait(3);
+                    
+                    switch ( Gsensor.readGesture() ) {
+                    case DIR_RIGHT:
+                    
+                    serial.printf("\n---------- Prep Socket for Data Send ----------\r\n"); 
+                    strcpy(snd, "AT+CIPSEND=4,5\r\n");
+                    SendCMD();
+                    timeout=1;
+                    getReply();
+                    wait(0.5); 
+                    serial.printf(buf);
+                    
+                    serial.printf("\n---------- Send String ----------\r\n"); 
+                    strcpy(snd, "RIGHT");
+                    serial.printf(snd);
+                    SendCMD();
+                    timeout=3;
+                    getReply(); 
+                    serial.printf(buf);
+                    parstr();
+                    break;
+                    
+                    default:
+                    egg_def();
+    }
+ }
+ return 0;
+}
